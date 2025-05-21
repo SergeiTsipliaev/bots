@@ -5,13 +5,14 @@
 Класс для отправки уведомлений о торговых сигналах.
 Обеспечивает обработку команд Telegram-бота и отправку уведомлений.
 """
-
+from config import CONFIG, COIN_DESCRIPTIONS
+from cati_bot.utils import logger
 import asyncio
 import requests
 import json
 from typing import Dict, Any, List, Optional
 
-from config import CONFIG, COIN_DESCRIPTIONS
+from config import CONFIG
 from cati_bot.utils import logger
 
 
@@ -19,17 +20,96 @@ class NotificationSender:
     """Класс для отправки уведомлений и обработки Telegram-команд"""
 
     def __init__(self):
+        from config import COIN_DESCRIPTIONS
+        self.coin_descriptions = COIN_DESCRIPTIONS
         # Проверяем, что настроены Telegram-параметры
         self.telegram_enabled = bool(CONFIG["telegram_bot_token"] and CONFIG["telegram_chat_id"])
+        
+        if self.telegram_enabled:
+            logger.info(f"Telegram включен. Токен: {CONFIG['telegram_bot_token'][:5]}... Чат ID: {CONFIG['telegram_chat_id']}")
+        else:
+            logger.warning("Telegram отключен. Проверьте настройки telegram_bot_token и telegram_chat_id в config.py")
         
         # Отслеживание последнего update_id
         self.last_update_id = 0
         
         # Словарь для отслеживания подписок пользователей на монеты
-        self.user_subscriptions = {}  # {chat_id: [coins]}
+        self.user_subscriptions = {
+            CONFIG["telegram_chat_id"]: ["ALL"]  # По умолчанию основной чат подписан на все монеты
+        }
         
         # Временные данные для поддержки диалога с пользователем
         self.user_context = {}  # {chat_id: {'state': 'wait_for_coin', 'data': {}}}
+        
+        # Проверяем соединение с Telegram API
+        self._check_telegram_connection()
+
+    def _check_telegram_connection(self) -> bool:
+        """Проверка соединения с Telegram API"""
+        if not self.telegram_enabled:
+            logger.warning("Telegram отключен. Проверка соединения пропущена.")
+            return False
+            
+        try:
+            # Проверяем токен бота
+            url = f"https://api.telegram.org/bot{CONFIG['telegram_bot_token']}/getMe"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            if data.get("ok"):
+                bot_username = data.get("result", {}).get("username", "Unknown")
+                bot_name = data.get("result", {}).get("first_name", "Unknown")
+                logger.info(f"Соединение с Telegram API успешно установлено. Бот: {bot_name} (@{bot_username})")
+                
+                # Отправляем тестовое сообщение
+                test_message = f"🤖 Бот для анализа криптовалют запущен и готов к работе!"
+                try:
+                    # Подготавливаем запрос
+                    send_url = f"https://api.telegram.org/bot{CONFIG['telegram_bot_token']}/sendMessage"
+                    payload = {
+                        "chat_id": CONFIG["telegram_chat_id"],
+                        "text": test_message
+                    }
+                    
+                    # Отправляем запрос
+                    send_response = requests.post(send_url, json=payload, timeout=10)
+                    send_data = send_response.json()
+                    
+                    # Проверяем успешность отправки
+                    if send_data.get("ok"):
+                        logger.info(f"Тестовое сообщение успешно отправлено в чат {CONFIG['telegram_chat_id']}")
+                    else:
+                        error_msg = send_data.get("description", "Неизвестная ошибка")
+                        logger.error(f"Не удалось отправить тестовое сообщение: {error_msg}")
+                        
+                        # Если ошибка связана с неверным ID чата, выводим дополнительную информацию
+                        if "chat not found" in error_msg.lower():
+                            logger.error(f"Проверьте правильность указанного ID чата: {CONFIG['telegram_chat_id']}")
+                            logger.error("Для личного чата ID должен быть положительным числом.")
+                            logger.error("Для группы или канала ID должен начинаться с '-'.")
+                        
+                        # Если бот заблокирован пользователем
+                        elif "blocked" in error_msg.lower():
+                            logger.error("Бот заблокирован пользователем. Разблокируйте бота в Telegram.")
+                        
+                        return False
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке тестового сообщения: {e}")
+                    return False
+                
+                return True
+            else:
+                error_msg = data.get("description", "Неизвестная ошибка")
+                logger.error(f"Ошибка соединения с Telegram API: {error_msg}")
+                
+                # Если ошибка связана с неверным токеном
+                if "unauthorized" in error_msg.lower():
+                    logger.error("Указан неверный токен Telegram бота. Проверьте токен в файле config.py.")
+                
+                return False
+        except Exception as e:
+            logger.error(f"Ошибка при проверке соединения с Telegram API: {e}")
+            return False
 
     async def send_signal_notification(self, signal: Dict[str, Any]) -> bool:
         """Метод для отправки уведомления о торговом сигнале"""
@@ -43,20 +123,42 @@ class NotificationSender:
             
             # Отправляем в Telegram, если включено
             if self.telegram_enabled:
+                logger.info(f"Телеграм включен, отправляем сигнал для {signal['symbol']}")
+                
                 # Получаем все чаты, подписанные на данную монету
                 symbol = signal['symbol']
+                subscribers_found = False
+                
+                # Отладочная информация о подписках
+                logger.info(f"Текущие подписки пользователей: {self.user_subscriptions}")
+                
                 for chat_id, symbols in self.user_subscriptions.items():
                     # Если пользователь подписан на эту монету или на все монеты
                     if symbol in symbols or 'ALL' in symbols:
-                        await self._send_telegram_message(message, chat_id)
+                        logger.info(f"Найден подписчик {chat_id} для {symbol}")
+                        subscribers_found = True
+                        success = await self._send_telegram_message(message, chat_id)
+                        if not success:
+                            logger.error(f"Не удалось отправить сообщение подписчику {chat_id}")
                 
-                # Если нет подписок, отправляем в стандартный чат
-                if not self.user_subscriptions:
+                # Если нет подписок или никто не подписан на эту монету, отправляем в стандартный чат
+                if not subscribers_found:
+                    logger.info(f"Подписчики для {symbol} не найдены, отправляем в стандартный чат {CONFIG['telegram_chat_id']}")
                     await self._send_telegram_message(message, CONFIG["telegram_chat_id"])
+                
+                # Всегда отправляем копию в стандартный чат для отладки
+                if CONFIG["telegram_chat_id"] and CONFIG.get("always_send_to_main_chat", True):
+                    logger.info(f"Отправляем копию сигнала в основной чат {CONFIG['telegram_chat_id']}")
+                    await self._send_telegram_message(message, CONFIG["telegram_chat_id"])
+            else:
+                logger.warning("Телеграм отключен, уведомления не отправляются")
             
             return True
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления: {e}")
+            # Логируем полную информацию об ошибке для отладки
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
             return False
 
     def _format_signal_message(self, signal: Dict[str, Any]) -> str:
@@ -121,17 +223,90 @@ class NotificationSender:
             url = f"https://api.telegram.org/bot{CONFIG['telegram_bot_token']}/sendMessage"
             payload = {
                 "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "HTML"
+                "text": message
             }
             
-            response = requests.post(url, json=payload)
-            response.raise_for_status()
+            # Удаляем parse_mode для длинных сообщений, чтобы избежать ошибок парсинга HTML
+            if len(message) > 4000:
+                # Разделение длинного сообщения на части
+                chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
+                logger.info(f"Сообщение слишком длинное ({len(message)} символов), разделено на {len(chunks)} частей")
+                
+                success = True
+                for i, chunk in enumerate(chunks):
+                    chunk_payload = {
+                        "chat_id": chat_id,
+                        "text": f"(Часть {i+1}/{len(chunks)}) {chunk}"
+                    }
+                    
+                    # Добавляем отладочную информацию
+                    logger.info(f"Отправка части {i+1}/{len(chunks)} в Telegram: URL={url}, chat_id={chat_id}, длина части={len(chunk)}")
+                    
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            response = requests.post(url, json=chunk_payload, timeout=30)
+                            
+                            # Логируем детали ответа для отладки
+                            logger.info(f"Ответ от Telegram API: Статус={response.status_code}, Текст={response.text[:100]}...")
+                            
+                            response.raise_for_status()
+                            break  # Выходим из цикла попыток, если запрос успешен
+                        except Exception as e:
+                            logger.error(f"Попытка {attempt+1}/{max_retries} не удалась: {e}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка перед повторной попыткой
+                            else:
+                                success = False
+                                logger.error(f"Не удалось отправить часть {i+1} сообщения после {max_retries} попыток")
+                
+                return success
+            else:
+                # Обычная отправка для коротких сообщений
+                # Добавляем отладочную информацию
+                logger.info(f"Отправка запроса в Telegram: URL={url}, chat_id={chat_id}, длина сообщения={len(message)}")
+                
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.post(url, json=payload, timeout=30)
+                        
+                        # Логируем детали ответа для отладки
+                        logger.info(f"Ответ от Telegram API: Статус={response.status_code}, Текст={response.text[:100]}...")
+                        
+                        data = response.json()
+                        if not data.get("ok"):
+                            error_msg = data.get("description", "Неизвестная ошибка")
+                            logger.error(f"Ошибка API Telegram: {error_msg}")
+                            
+                            # Если ошибка связана с неверным ID чата
+                            if "chat not found" in error_msg.lower():
+                                logger.error(f"Проверьте правильность указанного ID чата: {chat_id}")
+                            # Если бот заблокирован пользователем
+                            elif "blocked" in error_msg.lower():
+                                logger.error(f"Бот заблокирован пользователем в чате {chat_id}")
+                            
+                            return False
+                        
+                        response.raise_for_status()
+                        break  # Выходим из цикла попыток, если запрос успешен
+                    except Exception as e:
+                        logger.error(f"Попытка {attempt+1}/{max_retries} не удалась: {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка перед повторной попыткой
+                        else:
+                            # Логируем полную информацию об ошибке для отладки
+                            import traceback
+                            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
+                            return False
             
             logger.info(f"Сообщение успешно отправлено в Telegram (chat_id: {chat_id})")
             return True
         except Exception as e:
             logger.error(f"Ошибка отправки в Telegram: {e}")
+            # Логируем полную информацию об ошибке для отладки
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
             return False
 
     async def poll_updates(self) -> None:
@@ -234,6 +409,10 @@ class NotificationSender:
             # Показываем подписки пользователя
             await self._send_user_subscriptions(chat_id)
         
+        elif command == "/test":
+            # Отправляем тестовое сообщение для проверки соединения
+            await self._send_telegram_message("🧪 Тестовое сообщение. Соединение с ботом работает корректно.", chat_id)
+        
         else:
             # Неизвестная команда
             await self._send_telegram_message("Неизвестная команда. Используйте /help для получения списка команд.", chat_id)
@@ -326,6 +505,7 @@ class NotificationSender:
             "/analyze - Запросить анализ монеты\n"
             "/list - Показать список доступных монет\n"
             "/mycoins - Показать мои подписки\n"
+            "/test - Проверить соединение с ботом\n"
             "/help - Показать эту справку\n\n"
             "Бот анализирует рынок и отправляет торговые сигналы с долгосрочными прогнозами."
         )
@@ -355,6 +535,10 @@ class NotificationSender:
         
         message = "📊 Ваши подписки:\n\n"
         for symbol in self.user_subscriptions[chat_id]:
+            # Здесь нужно импортировать COIN_DESCRIPTIONS
+            from config import COIN_DESCRIPTIONS
+            
+            # Получаем описание монеты, если оно есть в словаре
             description = COIN_DESCRIPTIONS.get(symbol, "")
             message += f"• {symbol} - {description}\n"
         

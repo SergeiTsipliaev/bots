@@ -51,10 +51,25 @@ CONFIG = {
     "stop_loss_percent": 1,  # Процент для стоп-лосса
     "take_profit_percent": 9,  # Процент для тейк-профита
     
+    # Параметры для долгосрочного анализа
+    "long_term_analysis": True,  # Включен ли долгосрочный анализ
+    "support_resistance_lookback": 200,  # Количество свечей для поиска уровней
+    "volatility_multiplier": 1.5,  # Множитель для расчета волатильности в прогнозе
+    "trend_impact_factor": 0.7,  # Степень влияния тренда на прогноз (0-1)
+    
     # API и уведомления
     "api_base_url": "https://api.bybit.com",  # Базовый URL API Bybit
-    "telegram_bot_token": "8117006241:AAHMbaFLvDEnMzQnWpFnq2AAyj4Wa1ae_CU",  # Заменить на свой токен 
-    "telegram_chat_id": "845124301",  # Заменить на свой ID чата -1002690491295
+    "telegram_bot_token": "8117006241:AAHMbaFLvDEnMzQnWpFnq2AAyj4Wa1ae_CU",  # Токен Telegram-бота
+    "telegram_chat_id": "845124301",  # Основной ID чата для уведомлений 
+    
+    # Дополнительные настройки Telegram
+    "telegram_enabled": True,  # Включен ли Telegram (можно отключить для отладки)
+    "always_send_to_main_chat": True,  # Всегда отправлять копию сигналов в основной чат
+    "telegram_debug": True,  # Включить расширенное логирование Telegram
+    "telegram_retry_attempts": 3,  # Количество попыток отправки при ошибке
+    "telegram_retry_delay": 2,  # Базовая задержка между попытками (в секундах)
+    "telegram_timeout": 30,  # Таймаут для запросов к API Telegram (в секундах)
+    "telegram_max_message_length": 4000,  # Максимальная длина сообщения
     
     # Настройки логирования
     "log_level": "INFO",
