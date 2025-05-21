@@ -123,10 +123,16 @@ class NotificationSender:
                 if signal.get('signal_type') == "HOLD":
                     logger.info(f"Игнорируем сигнал типа HOLD для {signal.get('symbol')}")
                     return False
+                    
+                # Проверяем уверенность в сигнале
+                confidence = signal.get('confidence', 0)
+                if confidence < 0.6:  # Порог 60%
+                    logger.info(f"Игнорируем сигнал с низкой уверенностью ({confidence*100:.2f}%) для {signal.get('symbol')}")
+                    return False
             else:
                 logger.error("Сигнал равен None")
                 return False
-                    
+                
             # Формируем сообщение
             message = self._format_signal_message(signal)
             
@@ -137,6 +143,7 @@ class NotificationSender:
                 # Получаем все чаты, подписанные на данную монету
                 symbol = signal['symbol']
                 subscribers_found = False
+                sent_to_main_chat = False
                 
                 # Отладочная информация о подписках
                 logger.info(f"Текущие подписки пользователей: {self.user_subscriptions}")
@@ -147,6 +154,9 @@ class NotificationSender:
                         logger.info(f"Найден подписчик {chat_id} для {symbol}")
                         subscribers_found = True
                         success = await self._send_telegram_message(message, chat_id)
+                        # Отмечаем, если сообщение было отправлено в основной чат
+                        if chat_id == CONFIG["telegram_chat_id"]:
+                            sent_to_main_chat = True
                         if not success:
                             logger.error(f"Не удалось отправить сообщение подписчику {chat_id}")
                 
@@ -154,9 +164,10 @@ class NotificationSender:
                 if not subscribers_found:
                     logger.info(f"Подписчики для {symbol} не найдены, отправляем в стандартный чат {CONFIG['telegram_chat_id']}")
                     await self._send_telegram_message(message, CONFIG["telegram_chat_id"])
+                    sent_to_main_chat = True
                 
-                # Всегда отправляем копию в стандартный чат для отладки
-                if CONFIG["telegram_chat_id"] and CONFIG.get("always_send_to_main_chat", True):
+                # Отправляем копию в стандартный чат для отладки только если он ещё не получил это сообщение
+                if CONFIG["telegram_chat_id"] and CONFIG.get("always_send_to_main_chat", True) and not sent_to_main_chat:
                     logger.info(f"Отправляем копию сигнала в основной чат {CONFIG['telegram_chat_id']}")
                     await self._send_telegram_message(message, CONFIG["telegram_chat_id"])
             else:
@@ -205,9 +216,14 @@ class NotificationSender:
                     message += f"- {pattern['pattern']} ({pattern['confidence'] * 100:.0f}%)\n"
                 message += "\n"
         
-        # Добавляем силу сигнала
+        # Добавляем силу сигнала и уверенность
         if signal['signal_type'] != 'HOLD':
-            message += f"Сила сигнала: {signal['strength'] * 100:.0f}%\n\n"
+            message += f"Сила сигнала: {signal['strength'] * 100:.0f}%\n"
+            # Добавляем уверенность в сигнале
+            if 'confidence' in signal:
+                message += f"Уверенность: {signal['confidence'] * 100:.0f}%\n\n"
+            else:
+                message += "\n"
         
         # Добавляем рекомендуемые действия
         message += "Рекомендуемые действия:\n"
@@ -348,6 +364,7 @@ class NotificationSender:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
+                    # Используем params как отдельный параметр, чтобы requests правильно форматировал URL
                     response = requests.get(url, params=params, timeout=30)
                     response.raise_for_status()
                     updates = response.json()
