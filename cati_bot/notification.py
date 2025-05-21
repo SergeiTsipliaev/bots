@@ -118,10 +118,15 @@ class NotificationSender:
             logger.info(f"Получен сигнал для отправки: {type(signal)}")
             if signal is not None:
                 logger.info(f"Ключи сигнала: {list(signal.keys())}")
+                
+                # Проверяем тип сигнала и игнорируем HOLD
+                if signal.get('signal_type') == "HOLD":
+                    logger.info(f"Игнорируем сигнал типа HOLD для {signal.get('symbol')}")
+                    return False
             else:
                 logger.error("Сигнал равен None")
                 return False
-                
+                    
             # Формируем сообщение
             message = self._format_signal_message(signal)
             
@@ -337,18 +342,33 @@ class NotificationSender:
                 "timeout": 30
             }
             
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            updates = response.json()
+            # Добавляем логирование для отладки
+            logger.debug(f"Запрос обновлений Telegram: URL={url}, params={params}")
             
-            if updates.get("ok") and updates.get("result"):
-                for update in updates["result"]:
-                    # Обновляем последний update_id
-                    self.last_update_id = max(self.last_update_id, update["update_id"])
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(url, params=params, timeout=30)
+                    response.raise_for_status()
+                    updates = response.json()
                     
-                    # Обрабатываем сообщение
-                    if "message" in update and "text" in update["message"]:
-                        await self._process_message(update["message"])
+                    logger.debug(f"Получен ответ: {updates}")
+                    
+                    if updates.get("ok") and updates.get("result"):
+                        for update in updates["result"]:
+                            # Обновляем последний update_id
+                            self.last_update_id = max(self.last_update_id, update["update_id"])
+                            
+                            # Обрабатываем сообщение
+                            if "message" in update and "text" in update["message"]:
+                                await self._process_message(update["message"])
+                    break  # Выходим из цикла попыток, если запрос успешен
+                except Exception as e:
+                    logger.error(f"Попытка {attempt+1}/{max_retries} не удалась: {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка
+                    else:
+                        raise
         except Exception as e:
             logger.error(f"Ошибка при получении обновлений Telegram: {e}")
 

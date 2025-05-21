@@ -86,7 +86,7 @@ COIN_DESCRIPTIONS = {
     "XRPUSDT": "Ripple (XRP) - цифровая валюта для платежных систем",
     "BNBUSDT": "Binance Coin (BNB) - нативный токен биржи Binance",
     "DOGEUSDT": "Dogecoin (DOGE) - мем-криптовалюта, первоначально созданная как шутка",
-    "SOLUSDT": "Solana (SOL) - блокчейн с высокой пропускной способностью",
+    # "SOLUSDT": "Solana (SOL) - блокчейн с высокой пропускной способностью",
     "ADAUSDT": "Cardano (ADA) - proof-of-stake блокчейн с научным подходом",
     "AVAXUSDT": "Avalanche (AVAX) - платформа для децентрализованных приложений",
     # Описания для новых монет

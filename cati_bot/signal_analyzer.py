@@ -59,10 +59,12 @@ class SignalAnalyzer:
             self._set_long_term_targets()
             
             # Генерация торгового сигнала
-            self._generate_trade_signal()
+            self.last_signal = self._generate_trade_signal()
             
             logger.info(f"Анализ {self.symbol} завершен")
-            return True
+            
+            # Если сгенерирован сигнал, возвращаем True
+            return self.last_signal is not None
         except Exception as e:
             logger.error(f"Ошибка анализа {self.symbol}: {e}")
             return False
@@ -479,28 +481,237 @@ class SignalAnalyzer:
         logger.info(f"Общий тренд {self.symbol}: {self.trend['общий']} (UP: {up_trend_percent:.1f}%, DOWN: {down_trend_percent:.1f}%)")
 
     def _generate_trade_signal(self) -> Dict:
-            # Текущий код...
+        """Метод для генерации торгового сигнала на основе собранных данных"""
+        try:
+            # Определяем тип сигнала на основе анализа
+            signal_type = "HOLD"  # По умолчанию сигнал ожидания
+            signal_strength = 0.0
+            messages = []
+            suggested_actions = []
             
-            # Перед возвратом проверяем структуру сигнала
-            if not isinstance(self.last_signal, dict):
-                logger.error(f"Сгенерирован некорректный сигнал типа {type(self.last_signal)}")
-                # Возвращаем базовый сигнал с минимальными данными
-                return {
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    "symbol": self.symbol,
-                    "signal_type": "HOLD",
-                    "strength": 0.0,
-                    "price": self.market_data.last_price,
-                    "messages": ["Ошибка при генерации сигнала"],
-                    "suggested_actions": ["Требуется проверка системы"],
-                    "market_info": [
-                        f"Инструмент: {self.symbol}",
-                        f"Текущая цена: {self.market_data.last_price:.6f}"
-                    ],
-                    "trend": {"общий": "неопределен"}
-                }
+            # Анализируем сигналы от разных таймфреймов с весами
+            weights = {
+                '5m': 0.1,
+                '15m': 0.2,
+                '1h': 0.3,
+                '4h': 0.4
+            }
             
+            buy_score = 0.0
+            sell_score = 0.0
+            buy_messages = []
+            sell_messages = []
+            total_weight = 0.0
+            
+            # Логика определения сигнала на основе весов таймфреймов
+            for timeframe, weight in weights.items():
+                if timeframe not in self.signals:
+                    continue
+                    
+                total_weight += weight
+                
+                # Проверяем сигналы на покупку
+                for signal in self.signals[timeframe]['buy']:
+                    buy_score += signal['strength'] * weight
+                    buy_messages.append(f"{timeframe}: {signal['message']} ({signal['strength']*100:.0f}%)")
+                
+                # Проверяем сигналы на продажу
+                for signal in self.signals[timeframe]['sell']:
+                    sell_score += signal['strength'] * weight
+                    sell_messages.append(f"{timeframe}: {signal['message']} ({signal['strength']*100:.0f}%)")
+            
+            # Нормализуем оценки
+            if total_weight > 0:
+                buy_score /= total_weight
+                sell_score /= total_weight
+            
+            # Определяем окончательный тип сигнала
+            if buy_score > 0.4 and buy_score > sell_score * 1.5:
+                signal_type = "BUY"
+                signal_strength = buy_score
+                messages = buy_messages
+            elif sell_score > 0.4 and sell_score > buy_score * 1.5:
+                signal_type = "SELL"
+                signal_strength = sell_score
+                messages = sell_messages
+            else:
+                # Это сигнал HOLD - можно закомментировать, если не нужен
+                # signal_type = "HOLD"
+                # signal_strength = max(0.3, (buy_score + sell_score) / 2)
+                # messages = buy_messages + sell_messages
+                
+                # Если сигнал HOLD, просто возвращаем None, чтобы не отправлять уведомление
+                return None
+            
+            # Формируем рекомендации на основе типа сигнала
+            if signal_type in ["BUY", "SELL"]:
+                current_price = self.market_data.last_price
+                
+                if signal_type == "BUY":
+                    # Находим ближайшее сопротивление для тейк-профита
+                    if self.market_data.resistance and len(self.market_data.resistance) > 0:
+                        take_profit = self.market_data.resistance[0]['price']
+                        tp_percent = ((take_profit - current_price) / current_price) * 100
+                    else:
+                        # Если нет данных о сопротивлении, используем процент из конфига
+                        take_profit = current_price * (1 + CONFIG["take_profit_percent"] / 100)
+                        tp_percent = CONFIG["take_profit_percent"]
+                    
+                    # Находим ближайшую поддержку для стоп-лосса
+                    if self.market_data.support and len(self.market_data.support) > 0:
+                        stop_loss = max(
+                            self.market_data.support[0]['price'],
+                            current_price * (1 - CONFIG["stop_loss_percent"] / 100)
+                        )
+                    else:
+                        stop_loss = current_price * (1 - CONFIG["stop_loss_percent"] / 100)
+                    
+                    sl_percent = ((current_price - stop_loss) / current_price) * 100
+                    
+                    suggested_actions.append(f"Цена входа: {current_price:.6f}")
+                    suggested_actions.append(f"Ближайший тейк-профит: {take_profit:.6f} ({tp_percent:.2f}%)")
+                    suggested_actions.append(f"Стоп-лосс: {stop_loss:.6f} ({sl_percent:.2f}%)")
+                
+                elif signal_type == "SELL":
+                    # Для сигнала на продажу меняем логику тейк-профит и стоп-лосс
+                    if self.market_data.support and len(self.market_data.support) > 0:
+                        take_profit = self.market_data.support[0]['price']
+                        tp_percent = ((current_price - take_profit) / current_price) * 100
+                    else:
+                        take_profit = current_price * (1 - CONFIG["take_profit_percent"] / 100)
+                        tp_percent = CONFIG["take_profit_percent"]
+                    
+                    if self.market_data.resistance and len(self.market_data.resistance) > 0:
+                        stop_loss = min(
+                            self.market_data.resistance[0]['price'],
+                            current_price * (1 + CONFIG["stop_loss_percent"] / 100)
+                        )
+                    else:
+                        stop_loss = current_price * (1 + CONFIG["stop_loss_percent"] / 100)
+                    
+                    sl_percent = ((stop_loss - current_price) / current_price) * 100
+                    
+                    suggested_actions.append(f"Цена входа: {current_price:.6f}")
+                    suggested_actions.append(f"Ближайший тейк-профит: {take_profit:.6f} ({tp_percent:.2f}%)")
+                    suggested_actions.append(f"Стоп-лосс: {stop_loss:.6f} ({sl_percent:.2f}%)")
+                
+                # Добавляем долгосрочные целевые уровни
+                suggested_actions.append("")
+                suggested_actions.append("Долгосрочные целевые уровни:")
+                
+                if signal_type == "BUY" and self.long_term_targets.get("sell"):
+                    # Для сигнала на покупку добавляем целевые уровни продажи (сопротивления)
+                    targets = self.long_term_targets["sell"]
+                    for i, target in enumerate(targets[:3]):  # Берем максимум 3 уровня
+                        profit_percent = ((target["price"] - current_price) / current_price) * 100
+                        suggested_actions.append(
+                            f"{i+1}. {target['price']:.6f} ({profit_percent:.2f}% от текущей) - {target['description']}"
+                        )
+                
+                elif signal_type == "SELL" and self.long_term_targets.get("buy"):
+                    # Для сигнала на продажу добавляем целевые уровни покупки (поддержки)
+                    targets = self.long_term_targets["buy"]
+                    for i, target in enumerate(targets[:3]):  # Берем максимум 3 уровня
+                        profit_percent = ((current_price - target["price"]) / current_price) * 100
+                        suggested_actions.append(
+                            f"{i+1}. {target['price']:.6f} ({profit_percent:.2f}% от текущей) - {target['description']}"
+                        )
+                
+                # Добавляем прогнозы цен
+                suggested_actions.append("")
+                suggested_actions.append("Прогнозы движения цены:")
+                
+                if self.price_predictions.get("short_term"):
+                    short_term = self.price_predictions["short_term"]
+                    change_percent = ((short_term["expected"] - current_price) / current_price) * 100
+                    direction = "↗️" if change_percent > 0 else "↘️"
+                    suggested_actions.append(
+                        f"6 часов: {direction} {short_term['expected']:.6f} (±{abs(change_percent):.2f}%)"
+                    )
+                    suggested_actions.append(
+                        f"  Диапазон: {short_term['min']:.6f} - {short_term['max']:.6f}"
+                    )
+                
+                if self.price_predictions.get("medium_term"):
+                    medium_term = self.price_predictions["medium_term"]
+                    change_percent = ((medium_term["expected"] - current_price) / current_price) * 100
+                    direction = "↗️" if change_percent > 0 else "↘️"
+                    suggested_actions.append(
+                        f"24 часа: {direction} {medium_term['expected']:.6f} (±{abs(change_percent):.2f}%)"
+                    )
+                    suggested_actions.append(
+                        f"  Диапазон: {medium_term['min']:.6f} - {medium_term['max']:.6f}"
+                    )
+                
+                if self.price_predictions.get("long_term"):
+                    long_term = self.price_predictions["long_term"]
+                    change_percent = ((long_term["expected"] - current_price) / current_price) * 100
+                    direction = "↗️" if change_percent > 0 else "↘️"
+                    suggested_actions.append(
+                        f"7 дней: {direction} {long_term['expected']:.6f} (±{abs(change_percent):.2f}%)"
+                    )
+                    suggested_actions.append(
+                        f"  Диапазон: {long_term['min']:.6f} - {long_term['max']:.6f}"
+                    )
+            
+            # Создаем структуру сигнала
+            market_info = [
+                f"Инструмент: {self.symbol}",
+                f"Текущая цена: {self.market_data.last_price:.6f}",
+                f"Изменение за день: {self.market_data.daily_change:.2f}%",
+                f"Общий тренд: {self.trend['общий']}",
+                f"Рыночная фаза: {self.market_cycles.get('phase', 'неопределенная')}",
+            ]
+            
+            # Добавляем информацию о ближайших уровнях поддержки и сопротивления
+            if self.market_data.support and len(self.market_data.support) > 0:
+                market_info.append(f"Ближайшая поддержка: {self.market_data.support[0]['price']:.6f}")
+            
+            if self.market_data.resistance and len(self.market_data.resistance) > 0:
+                market_info.append(f"Ближайшее сопротивление: {self.market_data.resistance[0]['price']:.6f}")
+            
+            # Формируем полный сигнал
+            self.last_signal = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "symbol": self.symbol,
+                "signal_type": signal_type,
+                "strength": signal_strength,
+                "price": self.market_data.last_price,
+                "messages": messages,
+                "suggested_actions": suggested_actions,
+                "market_info": market_info,
+                "trend": self.trend,
+                "market_cycles": self.market_cycles,
+                "price_predictions": self.price_predictions,
+                "long_term_targets": self.long_term_targets
+            }
+            
+            logger.info(f"Сгенерирован сигнал {signal_type} для {self.symbol} с силой {signal_strength:.2f}")
             return self.last_signal
+        
+        except Exception as e:
+            logger.error(f"Ошибка генерации сигнала для {self.symbol}: {e}")
+            # Логируем полную трассировку для отладки
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
+            
+            # Возвращаем базовый сигнал с минимальными данными
+            default_signal = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "symbol": self.symbol,
+                "signal_type": "HOLD",
+                "strength": 0.0,
+                "price": self.market_data.last_price,
+                "messages": ["Ошибка при генерации сигнала"],
+                "suggested_actions": ["Требуется проверка системы"],
+                "market_info": [
+                    f"Инструмент: {self.symbol}",
+                    f"Текущая цена: {self.market_data.last_price:.6f}"
+                ],
+                "trend": {"общий": "неопределен"}
+            }
+            self.last_signal = default_signal
+            return None  # Возвращаем None, чтобы не отправлять ошибочный сигнал
 
     def _find_signals(self, timeframe: str) -> None:
         """Метод для поиска сигналов на конкретном таймфрейме"""

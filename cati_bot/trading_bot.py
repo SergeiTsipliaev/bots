@@ -169,10 +169,15 @@ class TradingBot:
             signal_analyzer = SignalAnalyzer(market_data)
             
             # Анализируем данные
-            signal_analyzer.analyze()
+            analysis_result = signal_analyzer.analyze()
             
             # Получаем торговый сигнал
             signal = signal_analyzer.last_signal
+            
+            # Проверяем, был ли сгенерирован сигнал
+            if not signal:
+                logger.info(f"Для {symbol} не сгенерирован сигнал покупки или продажи")
+                return True  # Возвращаем True, так как анализ произведён успешно
             
             # Отправляем уведомление о сигнале
             if chat_id:
