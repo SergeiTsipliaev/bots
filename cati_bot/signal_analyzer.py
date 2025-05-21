@@ -66,6 +66,8 @@ class SignalAnalyzer:
         except Exception as e:
             logger.error(f"Ошибка анализа {self.symbol}: {e}")
             return False
+        
+    
     
     def _analyze_market_cycles(self) -> None:
         """Метод для анализа рыночных циклов и определения фазы рынка"""
@@ -475,6 +477,30 @@ class SignalAnalyzer:
             self.trend['общий'] = 'боковой'
         
         logger.info(f"Общий тренд {self.symbol}: {self.trend['общий']} (UP: {up_trend_percent:.1f}%, DOWN: {down_trend_percent:.1f}%)")
+
+    def _generate_trade_signal(self) -> Dict:
+            # Текущий код...
+            
+            # Перед возвратом проверяем структуру сигнала
+            if not isinstance(self.last_signal, dict):
+                logger.error(f"Сгенерирован некорректный сигнал типа {type(self.last_signal)}")
+                # Возвращаем базовый сигнал с минимальными данными
+                return {
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "symbol": self.symbol,
+                    "signal_type": "HOLD",
+                    "strength": 0.0,
+                    "price": self.market_data.last_price,
+                    "messages": ["Ошибка при генерации сигнала"],
+                    "suggested_actions": ["Требуется проверка системы"],
+                    "market_info": [
+                        f"Инструмент: {self.symbol}",
+                        f"Текущая цена: {self.market_data.last_price:.6f}"
+                    ],
+                    "trend": {"общий": "неопределен"}
+                }
+            
+            return self.last_signal
 
     def _find_signals(self, timeframe: str) -> None:
         """Метод для поиска сигналов на конкретном таймфрейме"""

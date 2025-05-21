@@ -59,7 +59,7 @@ CONFIG = {
     
     # API и уведомления
     "api_base_url": "https://api.bybit.com",  # Базовый URL API Bybit
-    "telegram_bot_token": "8117006241:AAHMbaFLvDEnMzQnWpFnq2AAyj4Wa1ae_CU",  # Токен Telegram-бота
+    "telegram_bot_token": "8139148387:AAE9DPDxII-osu5QlwET_KmNkE3ulUCTPyA",  # Токен Telegram-бота
     "telegram_chat_id": "845124301",  # Основной ID чата для уведомлений 
     
     # Дополнительные настройки Telegram

@@ -114,12 +114,16 @@ class NotificationSender:
     async def send_signal_notification(self, signal: Dict[str, Any]) -> bool:
         """Метод для отправки уведомления о торговом сигнале"""
         try:
+            # Добавляем отладочный вывод структуры сигнала
+            logger.info(f"Получен сигнал для отправки: {type(signal)}")
+            if signal is not None:
+                logger.info(f"Ключи сигнала: {list(signal.keys())}")
+            else:
+                logger.error("Сигнал равен None")
+                return False
+                
             # Формируем сообщение
             message = self._format_signal_message(signal)
-            
-            # Выводим в консоль
-            logger.info("=== ТОРГОВЫЙ СИГНАЛ ===")
-            logger.info(message)
             
             # Отправляем в Telegram, если включено
             if self.telegram_enabled:
