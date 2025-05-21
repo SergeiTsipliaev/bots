@@ -80,18 +80,32 @@ class NotificationSender:
             message += f"- {timeframe}: {trend}\n"
         message += "\n"
         
+        # Добавляем информацию о рыночной фазе
+        if 'market_cycles' in signal and signal['market_cycles'].get('phase'):
+            market_phase = signal['market_cycles'].get('phase')
+            confidence = signal['market_cycles'].get('confidence', 0) * 100
+            message += f"Рыночная фаза: {market_phase} (уверенность: {confidence:.0f}%)\n\n"
+            
+            # Добавляем замеченные паттерны, если они есть
+            patterns = signal['market_cycles'].get('patterns', [])
+            if patterns:
+                message += "Замеченные паттерны:\n"
+                for pattern in patterns:
+                    message += f"- {pattern['pattern']} ({pattern['confidence'] * 100:.0f}%)\n"
+                message += "\n"
+        
         # Добавляем силу сигнала
         if signal['signal_type'] != 'HOLD':
             message += f"Сила сигнала: {signal['strength'] * 100:.0f}%\n\n"
-            
-            # Добавляем рекомендуемые действия
-            message += "Рекомендуемые действия:\n"
-            message += "\n".join(signal['suggested_actions']) + "\n\n"
-            
-            # Добавляем причины
-            if signal['messages']:
-                message += "Причины сигнала:\n"
-                message += "\n".join(signal['messages']) + "\n"
+        
+        # Добавляем рекомендуемые действия
+        message += "Рекомендуемые действия:\n"
+        message += "\n".join(signal['suggested_actions']) + "\n\n"
+        
+        # Добавляем причины сигнала
+        if signal['messages']:
+            message += "Причины сигнала:\n"
+            message += "\n".join(signal['messages']) + "\n"
         
         return message
 
@@ -299,6 +313,8 @@ class NotificationSender:
         
         # Устанавливаем выбранную монету в user_context для дальнейшего использования
         self.user_context[chat_id]["data"]["analyze_symbol"] = coin
+        # Переводим состояние для обработки запроса анализа
+        self.user_context[chat_id]["state"] = "wait_for_analyze_processing"
 
     async def _send_help_message(self, chat_id: str) -> None:
         """Отправка справочного сообщения"""
@@ -311,7 +327,7 @@ class NotificationSender:
             "/list - Показать список доступных монет\n"
             "/mycoins - Показать мои подписки\n"
             "/help - Показать эту справку\n\n"
-            "Бот анализирует рынок и отправляет торговые сигналы."
+            "Бот анализирует рынок и отправляет торговые сигналы с долгосрочными прогнозами."
         )
         await self._send_telegram_message(message, chat_id)
 

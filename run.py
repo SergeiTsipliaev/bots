@@ -45,11 +45,16 @@ async def main() -> int:
         logger.info(f"Монеты для анализа: {', '.join(symbols_to_analyze)}")
         logger.info(f"Интервал обновления: {CONFIG['time_interval_minutes']} минут")
         
-        # Проверка подключения к API
+        # Проверка подключения к API Bybit
         try:
-            response = requests.get(f"{CONFIG['api_base_url']}/api/v3/ping")
+            response = requests.get(f"{CONFIG['api_base_url']}/v5/market/time")
             response.raise_for_status()
-            logger.info("Подключение к Binance API успешно")
+            data = response.json()
+            if data.get('retCode') == 0:
+                logger.info("Подключение к Bybit API успешно")
+            else:
+                logger.error(f"Ошибка API Bybit: {data.get('retMsg')}")
+                raise Exception(f"Ошибка API Bybit: {data.get('retMsg')}")
         except Exception as e:
             logger.error(f"Ошибка подключения к API: {e}")
             raise Exception("Не удалось подключиться к API биржи. Проверьте соединение с интернетом или работоспособность API.")

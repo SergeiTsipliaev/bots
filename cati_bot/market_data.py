@@ -3,7 +3,7 @@
 
 """
 Класс для работы с рыночными данными криптовалют.
-Получает данные с Binance API и вычисляет технические индикаторы.
+Получает данные с Bybit API и вычисляет технические индикаторы.
 """
 
 import datetime
@@ -67,11 +67,12 @@ class MarketData:
             return False
 
     async def fetch_candles(self, timeframe: str) -> pd.DataFrame:
-        """Метод для получения свечных данных с API биржи"""
+        """Метод для получения свечных данных с API биржи Bybit"""
         try:
             limit = 500  # Количество свечей для запроса
             interval = self._timeframe_to_api_interval(timeframe)
-            url = f"{CONFIG['api_base_url']}/api/v3/klines"
+            url = f"{CONFIG['api_base_url']}/v5/market/kline"
+            
             params = {
                 "symbol": self.symbol,
                 "interval": interval,
@@ -85,17 +86,26 @@ class MarketData:
             
             data = response.json()
             
+            # Проверяем успешность запроса
+            if data.get('retCode') != 0:
+                logger.error(f"Ошибка API Bybit: {data.get('retMsg')}")
+                raise Exception(f"Ошибка API Bybit: {data.get('retMsg')}")
+            
+            # Извлекаем данные свечей
+            klines = data.get('result', {}).get('list', [])
+            
+            # В Bybit API данные идут в обратном порядке (от новых к старым), переворачиваем их
+            klines.reverse()
+            
             # Преобразуем данные в DataFrame
-            df = pd.DataFrame(data, columns=[
+            df = pd.DataFrame(klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 
-                'volume', 'close_time', 'quote_asset_volume',
-                'number_of_trades', 'taker_buy_base_asset_volume',
-                'taker_buy_quote_asset_volume', 'ignore'
+                'volume', 'turnover'
             ])
             
             # Преобразуем типы данных
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+            numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'turnover']
             df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric)
             
             # Устанавливаем индекс
@@ -119,14 +129,15 @@ class MarketData:
             raise
 
     def _timeframe_to_api_interval(self, timeframe: str) -> str:
-        """Вспомогательный метод для преобразования формата таймфрейма в формат API Binance"""
+        """Вспомогательный метод для преобразования формата таймфрейма в формат API Bybit"""
         interval_map = {
-            '5m': '5m',
-            '15m': '15m',
-            '1h': '1h',
-            '4h': '4h'
+            '5m': '5',
+            '15m': '15',
+            '1h': '60',
+            '4h': '240',
+            '24': 'D'  # для дневного таймфрейма
         }
-        return interval_map.get(timeframe, '5m')
+        return interval_map.get(timeframe, '5')
 
     def calculate_indicators(self, timeframe: str) -> None:
         """Метод для расчета технических индикаторов"""
@@ -171,7 +182,10 @@ class MarketData:
         # Находим локальные минимумы и максимумы
         pivot_points = []
         
-        for i in range(2, len(df) - 2):
+        # Увеличиваем количество исследуемых свечей для поиска более глубоких уровней
+        lookback_period = min(len(df) - 4, 200)  # Максимум 200 свечей или все доступные
+        
+        for i in range(2, lookback_period - 2):
             # Проверка на локальный минимум
             if (df['low'].iloc[i] < df['low'].iloc[i-1] and 
                 df['low'].iloc[i] < df['low'].iloc[i-2] and 
@@ -180,7 +194,8 @@ class MarketData:
                 pivot_points.append({
                     'price': df['low'].iloc[i],
                     'type': 'support',
-                    'strength': 1
+                    'strength': 1,
+                    'date': df.index[i]
                 })
             
             # Проверка на локальный максимум
@@ -191,7 +206,8 @@ class MarketData:
                 pivot_points.append({
                     'price': df['high'].iloc[i],
                     'type': 'resistance',
-                    'strength': 1
+                    'strength': 1,
+                    'date': df.index[i]
                 })
         
         # Группируем близкие уровни
@@ -208,6 +224,10 @@ class MarketData:
         
         self.resistance = sorted([level for level in sorted_levels if level['price'] > current_price], 
                                key=lambda x: x['price'])  # Сортируем по возрастанию (ближайшие сверху)
+        
+        # Оставляем большее количество уровней для более глубокого анализа
+        self.support = self.support[:min(10, len(self.support))]
+        self.resistance = self.resistance[:min(10, len(self.resistance))]
 
     def _group_levels(self, levels: List[Dict]) -> List[Dict]:
         """Метод для группировки близких уровней"""
