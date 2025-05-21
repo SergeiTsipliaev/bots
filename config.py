@@ -21,7 +21,7 @@ CONFIG = {
         "ADAUSDT",    # Cardano
         "CATIUSDT",   # Catizen
     ],
-    "time_interval_minutes": 1,
+    "time_interval_minutes": 0.5,
     "timeframes": ["5m", "15m", "1h", "4h", "24"],
     
     # Настройки индикаторов
@@ -37,13 +37,13 @@ CONFIG = {
     "vol_multiplier": 2.0,  # Множитель для определения всплеска объема
     
     # Настройки для управления рисками
-    "stop_loss_percent": 1.5,  # Процент для стоп-лосса
+    "stop_loss_percent": 1,  # Процент для стоп-лосса
     "take_profit_percent": 9,  # Процент для тейк-профита
     
     # API и уведомления
     "api_base_url": "https://api.binance.com",
-    "telegram_bot_token": "8117006241:AAHMbaFLvDEnMzQnWpFnq2AAyj4Wa1ae_CU",  # Заменить на свой токен
-    "telegram_chat_id": "-1002690491295",  # Заменить на свой ID чата
+    "telegram_bot_token": "8117006241:AAHMbaFLvDEnMzQnWpFnq2AAyj4Wa1ae_CU",  # Заменить на свой токен 
+    "telegram_chat_id": "845124301",  # Заменить на свой ID чата -1002690491295
     
     # Настройки логирования
     "log_level": "INFO",
