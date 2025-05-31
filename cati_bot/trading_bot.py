@@ -37,18 +37,24 @@ class TradingBot:
             
             # Инициализируем данные для каждого символа
             for symbol in self.symbols_to_analyze:
-                # Создаем объект MarketData для символа
-                market_data = MarketData(symbol)
-                
-                # Инициализируем данные
-                data_initialized = await market_data.initialize()
-                if not data_initialized:
-                    logger.error(f"Не удалось инициализировать данные для {symbol}")
+                try:
+                    # Создаем объект MarketData для символа
+                    market_data = MarketData(symbol)
+                    
+                    # Инициализируем данные
+                    data_initialized = await market_data.initialize()
+                    if not data_initialized:
+                        logger.error(f"Не удалось инициализировать данные для {symbol}")
+                        continue
+                    
+                    # Сохраняем в кэше
+                    self.market_data_cache[symbol] = market_data
+                    logger.info(f"Данные для {symbol} инициализированы успешно")
+                except Exception as e:
+                    logger.error(f"Ошибка инициализации данных для {symbol}: {e}")
+                    import traceback
+                    logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
                     continue
-                
-                # Сохраняем в кэше
-                self.market_data_cache[symbol] = market_data
-                logger.info(f"Данные для {symbol} инициализированы успешно")
             
             # Запускаем обработку Telegram-обновлений
             asyncio.create_task(self.notification_sender.poll_updates())
@@ -57,6 +63,8 @@ class TradingBot:
             return True
         except Exception as e:
             logger.error(f"Ошибка инициализации бота: {e}")
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
             return False
 
     async def start(self) -> bool:
@@ -84,12 +92,18 @@ class TradingBot:
     async def _analysis_loop(self) -> None:
         """Метод для периодического запуска анализа"""
         while not self._stop_event.is_set():
-            # Ждем указанное время
-            await asyncio.sleep(CONFIG["time_interval_minutes"] * 60)
-            
-            # Если бот не остановлен, запускаем анализ
-            if not self._stop_event.is_set():
-                await self.run_analysis_iteration()
+            try:
+                # Ждем указанное время
+                await asyncio.sleep(CONFIG["time_interval_minutes"] * 60)
+                
+                # Если бот не остановлен, запускаем анализ
+                if not self._stop_event.is_set():
+                    await self.run_analysis_iteration()
+            except Exception as e:
+                logger.error(f"Ошибка в цикле анализа: {e}")
+                import traceback
+                logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
+                await asyncio.sleep(60)  # Ждем минуту перед следующей попыткой
 
     async def _process_user_requests_loop(self) -> None:
         """Метод для обработки запросов пользователей через Telegram"""
@@ -101,14 +115,17 @@ class TradingBot:
                 for request in requests:
                     symbol = request["symbol"]
                     chat_id = request["chat_id"]
+                    signal_type = request.get("signal_type", "ALL")  # Тип сигнала, по умолчанию - все
                     
-                    # Анализируем запрошенную монету
-                    await self.analyze_symbol(symbol, chat_id)
+                    # Анализируем запрошенную монету с указанным типом сигнала
+                    await self.analyze_symbol(symbol, chat_id, signal_type)
                 
                 # Небольшая пауза перед следующей проверкой
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Ошибка обработки запросов пользователей: {e}")
+                import traceback
+                logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
                 await asyncio.sleep(5)
 
     def stop(self) -> bool:
@@ -133,19 +150,31 @@ class TradingBot:
         # Запускаем анализ для каждого символа
         for symbol in self.symbols_to_analyze:
             try:
-                # Анализируем символ
+                # Анализируем символ (используем стандартный анализ для всех типов)
                 await self.analyze_symbol(symbol)
             except Exception as e:
                 logger.error(f"Ошибка анализа {symbol}: {e}")
+                import traceback
+                logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
                 success = False
         
         logger.info("Итерация анализа завершена")
         return success
 
-    async def analyze_symbol(self, symbol: str, chat_id: str = None) -> bool:
-        """Метод для анализа конкретного символа"""
+    async def analyze_symbol(self, symbol: str, chat_id: str = None, signal_type: str = "ALL") -> bool:
+        """
+        Метод для анализа конкретного символа
+        
+        Args:
+            symbol: Символ для анализа
+            chat_id: ID чата для отправки результата или None для отправки всем подписчикам
+            signal_type: Тип сигнала (SHORT, LONG, ALL)
+            
+        Returns:
+            bool: True если анализ выполнен успешно, False в противном случае
+        """
         try:
-            logger.info(f"Анализ символа {symbol}")
+            logger.info(f"Анализ символа {symbol} (тип сигнала: {signal_type})")
             
             # Проверяем наличие данных в кэше
             if symbol not in self.market_data_cache:
@@ -160,7 +189,17 @@ class TradingBot:
                 self.market_data_cache[symbol] = market_data
             else:
                 # Обновляем существующие данные
-                await self.market_data_cache[symbol].update()
+                try:
+                    await self.market_data_cache[symbol].update()
+                except Exception as e:
+                    logger.error(f"Ошибка обновления данных для {symbol}: {e}")
+                    # Попробуем пересоздать объект данных
+                    market_data = MarketData(symbol)
+                    initialized = await market_data.initialize()
+                    if not initialized:
+                        logger.error(f"Не удалось переинициализировать данные для {symbol}")
+                        return False
+                    self.market_data_cache[symbol] = market_data
             
             # Получаем объект MarketData
             market_data = self.market_data_cache[symbol]
@@ -168,15 +207,29 @@ class TradingBot:
             # Создаем анализатор сигналов
             signal_analyzer = SignalAnalyzer(market_data)
             
-            # Анализируем данные
-            analysis_result = signal_analyzer.analyze()
+            # Проверяем валидность типа сигнала
+            if signal_type not in CONFIG["signal_types"]:
+                signal_type = CONFIG["default_signal_type"]
+                logger.warning(f"Неверный тип сигнала, используем тип по умолчанию: {signal_type}")
+            
+            # Анализируем данные с указанным типом сигнала
+            analysis_result = signal_analyzer.analyze(signal_type)
             
             # Получаем торговый сигнал
             signal = signal_analyzer.last_signal
             
             # Проверяем, был ли сгенерирован сигнал
             if not signal:
-                logger.info(f"Для {symbol} не сгенерирован сигнал покупки или продажи")
+                message = f"Для {symbol} не сгенерирован сигнал типа {signal_type}"
+                logger.info(message)
+                
+                # Если указан конкретный chat_id, отправляем сообщение об отсутствии сигнала
+                if chat_id:
+                    await self.notification_sender._send_telegram_message(
+                        f"⚠️ {message}. Возможно, нет достаточно сильных индикаторов для формирования сигнала.",
+                        chat_id
+                    )
+                
                 return True  # Возвращаем True, так как анализ произведён успешно
             
             # Отправляем уведомление о сигнале
@@ -188,17 +241,22 @@ class TradingBot:
                 # Иначе отправляем через стандартный механизм (подписчикам)
                 await self.notification_sender.send_signal_notification(signal)
             
-            logger.info(f"Анализ {symbol} выполнен успешно")
+            logger.info(f"Анализ {symbol} (тип сигнала: {signal_type}) выполнен успешно")
             return True
         except Exception as e:
-            logger.error(f"Ошибка анализа {symbol}: {e}")
+            logger.error(f"Ошибка анализа {symbol} (тип сигнала: {signal_type}): {e}")
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
             
             # Если был указан конкретный chat_id, отправляем сообщение об ошибке
             if chat_id:
-                await self.notification_sender._send_telegram_message(
-                    f"❌ Ошибка при анализе {symbol}: {str(e)}",
-                    chat_id
-                )
+                try:
+                    await self.notification_sender._send_telegram_message(
+                        f"❌ Ошибка при анализе {symbol}: {str(e)}",
+                        chat_id
+                    )
+                except Exception as send_error:
+                    logger.error(f"Ошибка отправки сообщения об ошибке: {send_error}")
             
             return False
 
@@ -225,6 +283,8 @@ class TradingBot:
             return True
         except Exception as e:
             logger.error(f"Ошибка добавления символа {symbol}: {e}")
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
             return False
 
     async def remove_symbol(self, symbol: str) -> bool:
@@ -243,4 +303,6 @@ class TradingBot:
             return True
         except Exception as e:
             logger.error(f"Ошибка удаления символа {symbol}: {e}")
+            import traceback
+            logger.error(f"Трассировка ошибки: {traceback.format_exc()}")
             return False

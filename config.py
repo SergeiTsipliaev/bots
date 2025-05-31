@@ -57,6 +57,16 @@ CONFIG = {
     "volatility_multiplier": 1.5,  # Множитель для расчета волатильности в прогнозе
     "trend_impact_factor": 0.7,  # Степень влияния тренда на прогноз (0-1)
     
+    # Настройки сигналов
+    "signal_types": ["SHORT", "LONG", "ALL"],  # Доступные типы сигналов
+    "default_signal_type": "ALL",  # Тип сигнала по умолчанию
+    # Параметры для определения типа сигнала
+    "short_term_hours": 24,        # Краткосрочный период (в часах)
+    "long_term_hours": 168,        # Долгосрочный период (в часах) - 7 дней
+    # Пороги уверенности для разных типов сигналов
+    "short_term_confidence": 0.6,  # Минимальная уверенность для краткосрочного сигнала
+    "long_term_confidence": 0.7,   # Минимальная уверенность для долгосрочного сигнала
+    
     # API и уведомления
     "api_base_url": "https://api.bybit.com",  # Базовый URL API Bybit
     "telegram_bot_token": "8139148387:AAE9DPDxII-osu5QlwET_KmNkE3ulUCTPyA",  # Токен Telegram-бота
@@ -100,4 +110,11 @@ COIN_DESCRIPTIONS = {
     "SHIBUSDT": "Shiba Inu (SHIB) - мем-токен экосистемы Ethereum",
     "APTUSDT": "Aptos (APT) - блокчейн первого уровня с высокой производительностью",
     "NEARUSDT": "NEAR Protocol (NEAR) - платформа для создания децентрализованных приложений"
+}
+
+# Описания типов сигналов
+SIGNAL_TYPE_DESCRIPTIONS = {
+    "SHORT": "Краткосрочные сигналы (до 24 часов)",
+    "LONG": "Долгосрочные сигналы (до 7 дней)",
+    "ALL": "Все типы сигналов"
 }
